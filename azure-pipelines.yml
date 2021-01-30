@@ -1,0 +1,84 @@
+trigger:
+  branches:
+    include:
+      - master
+      - refs/tags/*
+pr: none
+
+variables:
+  FlutterChannel: 'stable'
+  FlutterVersion: 'latest'
+
+  ProjectSlug: 'DemoOrganization1/Android1'
+  ProjectDirectory: '$(Build.SourcesDirectory)'
+
+  BuildNumber: '$(Build.BuildNumber)'
+  BuildMessage: '$(Build.SourceVersionMessage)'
+  BuildDirectory: '$(ProjectDirectory)/build/app/outputs/apk/release/app-release.apk'
+
+jobs:
+  - job: Build
+    pool:
+      vmImage: 'macOS-latest'
+    steps:
+      - task: FlutterInstall@0
+        displayName: Setup flutter
+        inputs:
+          channel: 'stable'
+          version: 'latest'
+
+      - task: PowerShell@2
+        displayName: Setup environment
+        inputs:
+          targetType: 'inline'
+          script: |
+            Write-Host "##vso[task.prependpath]$(JAVA_HOME_11_X64)"
+            Write-Host "##vso[task.setvariable variable=JAVA_HOME;]$(JAVA_HOME_11_X64)"
+            Write-Host "##vso[task.prependpath]$(FlutterToolPath)"
+            Write-Host "##vso[task.prependpath]$(FlutterToolPath)/cache/dart-sdk/bin"
+
+      - task: PowerShell@2
+        displayName: Setup variables (beta)
+        condition: startsWith(variables['Build.SourceBranch'], 'refs/heads/')
+        inputs:
+          targetType: 'inline'
+          script: |
+            $buildName = "$(Build.SourceVersion)".SubString(0,7)
+            # $distributionGroup = "<APP_CENTER_BETA_DISTRIBUTION_GROUP_ID>"
+            Write-Host "##vso[task.setvariable variable=BuildName;]$buildName"
+            Write-Host "##vso[task.setvariable variable=DistributionGroup;]$distributionGroup"
+
+      - task: PowerShell@2
+        displayName: Setup variables (public)
+        condition: startsWith(variables['Build.SourceBranch'], 'refs/tags/')
+        inputs:
+          targetType: 'inline'
+          script: |
+            $buildName = "$(Build.SourceBranch)".SubString(11)
+            # $distributionGroup = "<APP_CENTER_PUBLIC_DISTRIBUTION_GROUP_ID>"
+            Write-Host "##vso[task.setvariable variable=BuildName;]$buildName"
+            Write-Host "##vso[task.setvariable variable=DistributionGroup;]$distributionGroup"
+
+      - task: CmdLine@2
+        displayName: Run install
+        inputs:
+          script: 'flutter pub get'
+
+      - task: FlutterBuild@0
+        displayName: Run build
+        inputs:
+          target: 'apk'
+          projectDirectory: '$(ProjectDirectory)'
+          buildName: '$(BuildName)'
+          buildNumber: '$(BuildNumber)'
+
+      - task: AppCenterDistribute@3
+        displayName: Run distribute
+        inputs:
+          serverEndpoint: 'AppCenter Service Connection'
+          appSlug: '$(ProjectSlug)'
+          appFile: '$(BuildDirectory)'
+          releaseNotesOption: 'input'
+          releaseNotesInput: '$(BuildMessage)'
+          destinationType: 'groups'
+          distributionGroupId: '$(DistributionGroup)'
